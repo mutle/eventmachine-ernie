@@ -1,0 +1,6 @@
+.DS_Store
+*.swp
+ernie.log
+vendor/gems
+bin/*
+!bin/ernie

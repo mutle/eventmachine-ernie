@@ -1,0 +1,113 @@
+#!/usr/bin/env ruby
+
+require File.join(File.dirname(__FILE__), "../vendor/gems/environment")
+
+$:.unshift(File.join(File.dirname(__FILE__), *%w[.. lib]))
+ERNIE_ROOT = File.join(File.dirname(__FILE__), *%w[..])
+
+DEFAULT_PORT = 8000
+
+def rel(path)
+  File.join(ERNIE_ROOT, path)
+end
+
+def version
+  yml = YAML.load(File.read(File.join(File.dirname(__FILE__), *%w[.. VERSION.yml])))
+  "#{yml[:major]}.#{yml[:minor]}.#{yml[:patch]}"
+end
+
+require 'optparse'
+require 'pp'
+require 'yaml'
+
+help = <<HELP
+EMErnie is an Ruby BERT-RPC Server which utilizes EventMachine.
+
+Basic Command Line Usage:
+  ernie [command] [options]
+
+Commands:
+  <none>                Start an Ernie server.
+  reload-handlers       Gracefully reload all of the the ruby handlers
+                        and use the new code for all subsequent requests.
+
+Options:
+HELP
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = help
+  opts.version = version
+
+  opts.on("-h HANDLER", "--handler HANDLER", "Handler ruby file") do |x|
+    options[:handler] = x
+  end
+
+  opts.on("-p PORT", "--port PORT", "Port") do |x|
+    options[:port] = x
+  end
+
+  # opts.on("-n NUMBER", "--number NUMBER", "Number of handler instances") do |x|
+  #   options[:number] = x
+  # end
+
+  opts.on("-l LOGLEVEL", "--log-level LOGLEVEL", "Log level (0-4)") do |x|
+    options[:log_level] = x
+  end
+
+  opts.on("-d", "--detached", "Run as a daemon") do
+    options[:detached] = true
+  end
+
+  opts.on("-P", "--pidfile PIDFILE", "Location to write pid file.") do |x|
+    options[:pidfile] = x
+  end
+end.parse!
+
+if command = ARGV[0]
+  if !%w{reload-handlers stats}.include?(command)
+    puts "Invlalid command. Valid commands are:"
+    puts "  reload-handlers"
+    puts "  stats"
+    exit(1)
+  end
+
+  require 'rubygems'
+  require 'bertrpc'
+  port = options[:port] || DEFAULT_PORT
+  svc = BERTRPC::Service.new('localhost', port)
+  puts svc.call.__admin__.send(command.gsub(/-/, '_'))
+else
+  if !options[:handler]
+    puts "A handler must be specified: ernie -h /path/to/handler.rb"
+    exit(1)
+  end
+
+  handler = options[:handler]
+  options[:port] ||= DEFAULT_PORT
+  # options[:number] ||= 1
+  options[:log_level] ||= 2
+
+
+  require 'ernie'
+  require handler
+
+  Ernie.logfile("#{File.dirname(__FILE__)}/../ernie.log")
+  Ernie.server_options = options
+
+  if options[:detached]
+    if pid = fork
+      puts pid.inspect
+      Process.detach(pid)
+      exit!
+    end
+  end
+  pid = $$
+
+  if options[:pidfile]
+    File.open(options[:pidfile], "w") { |f| f.write pid }
+    at_exit { FileUtils.rm(options[:pidfile]) }
+  end
+
+  Ernie.start
+end
